@@ -1,7 +1,7 @@
 [project]
 name = "sql-debugger"
 version = "0.0.1"
-description = "A tool for breaking down data flows in large SQL files"
+description = "A tool for managing, debugging, and documenting legacy SQL"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
