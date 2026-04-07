@@ -1,0 +1,25 @@
+[project]
+name = "sql-debugger"
+version = "0.0.1"
+description = "A tool for breaking down data flows in large SQL files"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlglot>=30.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.38.4",
+    "pytest>=9.0.2",
+    "ruff>=0.15.8",
+]
+
+[tool.uv]
+package = true
+
+[project.scripts]
+
+[tool.basedpyright]
+venvPath = "."
+venv = ".venv"
