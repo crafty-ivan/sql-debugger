@@ -34,6 +34,7 @@ class Node:
     Attributes:
         key: Unique identifier for this node — a table name, alias, or the
             reserved key ``"select"`` for the terminal node.
+        sql: The SQL text describing and leading up to the node.
         parents: Keys of nodes that this node depends on (reads from).
         children: Keys of nodes that depend on (read from) this node.
     """
@@ -41,10 +42,12 @@ class Node:
     def __init__(
         self,
         key: str,
+        sql: str,
         parents: list[str] | None = None,
         children: list[str] | None = None,
     ) -> None:
         self.key: str = key
+        self.sql: str = sql
         self.parents: list[str] = parents if parents is not None else []
         self.children: list[str] = children if children is not None else []
 
@@ -98,6 +101,7 @@ class ResolvedNode:
 
     Attributes:
         key: The node's unique identifier (same as the source ``Node.key``).
+        sql: The SQL text of the node, same as ``Node.sql``.
         parents: Resolved parent nodes keyed by their ``key``.
         children: Resolved child nodes keyed by their ``key``.
         node_type: The original ``Node`` subclass (``SourceTable``, ``CTE``,
@@ -105,6 +109,7 @@ class ResolvedNode:
     """
 
     key: str
+    sql: str
     parents: dict[str, ResolvedNode] = field(default_factory=dict)
     children: dict[str, ResolvedNode] = field(default_factory=dict)
     node_type: type = Node
@@ -187,7 +192,7 @@ class DAG:
 
         # 1. Create ResolvedNode shells
         resolved: dict[str, ResolvedNode] = {
-            key: ResolvedNode(key=key, node_type=type(node))
+            key: ResolvedNode(key=key, sql=node.sql, node_type=type(node))
             for key, node in self.nodes.items()
         }
 
