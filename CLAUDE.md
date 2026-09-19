@@ -12,6 +12,8 @@ This is a Python package managed using uv. Below are some rules for working with
 ## Code Style
 
 - Unused results of non-`None` returning methods should be assigned to `_` instead of ignored
+- Comments explain why, not what. Only use comments to explain irregular choices
+- Do not use section header comments
 
 ## Workflow
 

@@ -1,4 +1,4 @@
-"""Two-pass DAG representation for step-by-step SQL debugging.
+"""DAG representation for step-by-step SQL debugging.
 
 Build phase: construct a mutable DAG of Nodes with string-based references.
 Resolution phase: call DAG.resolve() to produce an immutable ResolvedDAG
@@ -8,11 +8,6 @@ with validated, object-based references.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
-
-# ---------------------------------------------------------------------------
-# Errors
-# ---------------------------------------------------------------------------
 
 
 class ResolutionError(Exception):
@@ -29,12 +24,6 @@ class ResolutionError(Exception):
             f"DAG resolution failed with {len(errors)} error(s):\n"
             + "\n".join(f"  - {e}" for e in errors)
         )
-
-
-# ---------------------------------------------------------------------------
-# Builder-phase nodes
-# ---------------------------------------------------------------------------
-
 
 class Node:
     """A mutable node used during DAG construction.
@@ -98,11 +87,6 @@ class SetOperation(Node):
     """
 
 
-# ---------------------------------------------------------------------------
-# Resolved (immutable) types
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class ResolvedNode:
     """An immutable node with live object references to its neighbours.
@@ -145,12 +129,6 @@ class ResolvedDAG:
     origin_nodes: list[ResolvedNode]
     terminal_node: ResolvedNode
 
-
-# ---------------------------------------------------------------------------
-# Mutable DAG builder
-# ---------------------------------------------------------------------------
-
-
 class DAG:
     """Mutable DAG builder.
 
@@ -190,8 +168,6 @@ class DAG:
         """
         return self.nodes.pop(key, None)
 
-    # ---- resolution -----------------------------------------------------
-
     def resolve(self) -> ResolvedDAG:
         """Validate the DAG and produce an immutable ``ResolvedDAG``.
 
@@ -209,13 +185,13 @@ class DAG:
         """
         errors: list[str] = []
 
-        # -- 1. Create ResolvedNode shells --------------------------------
+        # 1. Create ResolvedNode shells
         resolved: dict[str, ResolvedNode] = {
             key: ResolvedNode(key=key, node_type=type(node))
             for key, node in self.nodes.items()
         }
 
-        # -- 2. Validate reference existence ------------------------------
+        # 2. Validate reference existence
         for key, node in self.nodes.items():
             for parent_key in node.parents:
                 if parent_key not in self.nodes:
@@ -230,7 +206,7 @@ class DAG:
                         + "which does not exist."
                     )
 
-        # -- 3. Validate reciprocal links ---------------------------------
+        # 3. Validate reciprocal links
         for key, node in self.nodes.items():
             for parent_key in node.parents:
                 if parent_key in self.nodes:
@@ -249,7 +225,7 @@ class DAG:
                             + f"but '{child_key}' does not list '{key}' as a parent."
                         )
 
-        # -- 4. Validate type constraints ---------------------------------
+        # 4. Validate type constraints
         TERMINAL_TYPES = (Select, SetOperation)
         terminal_candidates: list[str] = []
 
@@ -282,7 +258,7 @@ class DAG:
                 + "Select or SetOperation."
             )
 
-        # -- 5. Cycle detection (Kahn's algorithm) ------------------------
+        # 5. Cycle detection (Kahn's algorithm)
         if not errors:
             in_degree: dict[str, int] = {
                 key: len(node.parents) for key, node in self.nodes.items()
@@ -304,11 +280,11 @@ class DAG:
                     + str([k for k, d in in_degree.items() if d > 0])
                 )
 
-        # -- 6. Bail on errors --------------------------------------------
+        # 6. Bail on errors
         if errors:
             raise ResolutionError(errors)
 
-        # -- 7. Wire up resolved references -------------------------------
+        # 7. Wire up resolved references
         for key, node in self.nodes.items():
             rnode = resolved[key]
             for parent_key in node.parents:
@@ -316,7 +292,7 @@ class DAG:
             for child_key in node.children:
                 rnode.children[child_key] = resolved[child_key]
 
-        # -- 8. Build ResolvedDAG -----------------------------------------
+        # 8. Build ResolvedDAG
         origin_nodes = [
             rnode for rnode in resolved.values()
             if rnode.node_type is SourceTable
