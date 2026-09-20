@@ -46,6 +46,52 @@ def test_resolve_fails_dag_with_cyclical_nodes():
     assert len(exc_info.value.errors) == 1
 
 
+def test_resolve_ignores_dead_nodes_when_finding_the_terminal_node():
+    dag = DAG()
+    _ = dag.add_node(SourceTable("src", sql="", children=["mid"]))
+    _ = dag.add_node(CTE("mid", sql="", parents=["src"], children=["final"]))
+    _ = dag.add_node(Select("final", sql="", parents=["mid"]))
+    _ = dag.add_node(CTE("dead", sql="", is_dead_node=True))
+
+    resolved = dag.resolve()
+
+    assert resolved.terminal_node.key == "final"
+    assert [node.key for node in resolved.dead_nodes] == ["dead"]
+    assert [node.key for node in resolved.origin_nodes] == ["src"]
+
+
+def test_resolve_excludes_dead_source_tables_from_origin_nodes():
+    dag = DAG()
+    _ = dag.add_node(SourceTable("src", sql="", children=["mid"]))
+    _ = dag.add_node(CTE("mid", sql="", parents=["src"], children=["final"]))
+    _ = dag.add_node(Select("final", sql="", parents=["mid"]))
+    _ = dag.add_node(
+        SourceTable("dead_src", sql="", children=["dead"], is_dead_node=True)
+    )
+    _ = dag.add_node(
+        CTE("dead", sql="", parents=["dead_src"], is_dead_node=True)
+    )
+
+    resolved = dag.resolve()
+
+    assert [node.key for node in resolved.origin_nodes] == ["src"]
+    assert {node.key for node in resolved.dead_nodes} == {"dead_src", "dead"}
+
+
+def test_resolve_fails_when_a_dead_node_feeds_a_live_node():
+    dag = DAG()
+    _ = dag.add_node(
+        SourceTable("src", sql="", children=["final"], is_dead_node=True)
+    )
+    _ = dag.add_node(Select("final", sql="", parents=["src"]))
+
+    with pytest.raises(ResolutionError) as exc_info:
+        _ = dag.resolve()
+
+    assert len(exc_info.value.errors) == 1
+    assert "feeds live node" in exc_info.value.errors[0]
+
+
 def test_resolve_fails_dag_with_multi_child_subquery():
     dag = DAG()
     _ = dag.add_node(SourceTable("src", sql="", children=["sub"]))

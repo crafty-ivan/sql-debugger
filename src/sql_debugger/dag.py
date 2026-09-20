@@ -33,10 +33,12 @@ class Node:
 
     Attributes:
         key: Unique identifier for this node — a table name, alias, or the
-            reserved key ``"select"`` for the terminal node.
+            reserved key ``"result"`` for the terminal node.
         sql: The SQL text describing and leading up to the node.
         parents: Keys of nodes that this node depends on (reads from).
         children: Keys of nodes that depend on (read from) this node.
+        is_dead_node: Whether this node is unreachable from the terminal node
+            — dead code, such as a CTE that nothing references.
     """
 
     def __init__(
@@ -45,11 +47,13 @@ class Node:
         sql: str,
         parents: list[str] | None = None,
         children: list[str] | None = None,
+        is_dead_node: bool = False,
     ) -> None:
         self.key: str = key
         self.sql: str = sql
         self.parents: list[str] = parents if parents is not None else []
         self.children: list[str] = children if children is not None else []
+        self.is_dead_node: bool = is_dead_node
 
 
 class SourceTable(Node):
@@ -106,6 +110,7 @@ class ResolvedNode:
         children: Resolved child nodes keyed by their ``key``.
         node_type: The original ``Node`` subclass (``SourceTable``, ``CTE``,
             ``Subquery``, ``Select``, or ``SetOperation``).
+        is_dead_node: Whether this node is unreachable from the terminal node.
     """
 
     key: str
@@ -113,6 +118,7 @@ class ResolvedNode:
     parents: dict[str, ResolvedNode] = field(default_factory=dict)
     children: dict[str, ResolvedNode] = field(default_factory=dict)
     node_type: type = Node
+    is_dead_node: bool = False
 
 
 @dataclass(frozen=True)
@@ -124,15 +130,18 @@ class ResolvedDAG:
 
     Attributes:
         nodes: Every resolved node, keyed by ``key``.
-        origin_nodes: The subset of nodes whose ``node_type`` is
-            ``SourceTable`` (entry points of the DAG).
-        terminal_node: The single terminal node — a ``Select`` or
+        origin_nodes: The live nodes whose ``node_type`` is ``SourceTable``
+            (entry points of the DAG).  Dead source tables are excluded.
+        terminal_node: The single live terminal node — a ``Select`` or
             ``SetOperation`` with no children.
+        dead_nodes: Every node flagged ``is_dead_node``, i.e. unreachable
+            from ``terminal_node``.
     """
 
     nodes: dict[str, ResolvedNode]
     origin_nodes: list[ResolvedNode]
     terminal_node: ResolvedNode
+    dead_nodes: list[ResolvedNode]
 
 class DAG:
     """Mutable DAG builder.
@@ -192,7 +201,12 @@ class DAG:
 
         # 1. Create ResolvedNode shells
         resolved: dict[str, ResolvedNode] = {
-            key: ResolvedNode(key=key, sql=node.sql, node_type=type(node))
+            key: ResolvedNode(
+                key=key,
+                sql=node.sql,
+                node_type=type(node),
+                is_dead_node=node.is_dead_node,
+            )
             for key, node in self.nodes.items()
         }
 
@@ -245,14 +259,26 @@ class DAG:
                     f"Subquery '{key}' must have exactly one child, "
                     + f"but has {len(node.children)}: {node.children}."
                 )
-            if not node.children:
+            if node.is_dead_node:
+                live_children = [
+                    child_key
+                    for child_key in node.children
+                    if child_key in self.nodes
+                    and not self.nodes[child_key].is_dead_node
+                ]
+                if live_children:
+                    errors.append(
+                        f"Dead node '{key}' feeds live node(s) {live_children}; "
+                        + "a node reachable from the terminal node cannot be dead."
+                    )
+            elif not node.children:
                 terminal_candidates.append(key)
 
         if len(terminal_candidates) == 0:
             errors.append("DAG must contain exactly one terminal node; found none.")
         elif len(terminal_candidates) > 1:
             errors.append(
-                "DAG must contain exactly one terminal node (a node with no "
+                "DAG must contain exactly one terminal node (a live node with no "
                 + f"children); found {len(terminal_candidates)}: {terminal_candidates}."
             )
         elif not isinstance(self.nodes[terminal_candidates[0]], TERMINAL_TYPES):
@@ -300,15 +326,17 @@ class DAG:
         # 8. Build ResolvedDAG
         origin_nodes = [
             rnode for rnode in resolved.values()
-            if rnode.node_type is SourceTable
+            if rnode.node_type is SourceTable and not rnode.is_dead_node
         ]
         terminal_node = next(
             rnode for rnode in resolved.values()
-            if not rnode.children
+            if not rnode.children and not rnode.is_dead_node
         )
+        dead_nodes = [rnode for rnode in resolved.values() if rnode.is_dead_node]
 
         return ResolvedDAG(
             nodes=resolved,
             origin_nodes=origin_nodes,
             terminal_node=terminal_node,
+            dead_nodes=dead_nodes,
         )
